@@ -1,60 +1,51 @@
+import * as Cesium from 'cesium'
+import 'cesium/Build/Cesium/Widgets/widgets.css'
 import './style.css'
-import heroImg from './assets/hero.png'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import { setupCounter } from './counter.ts'
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src="${viteLogo}" class="vite" alt="Vite logo" />
-  </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+const HUB = 'http://localhost:8000'
+;(window as any).CESIUM_BASE_URL = '/cesium/'
 
-<div class="ticks"></div>
+document.body.insertAdjacentHTML('beforeend', '<div id="status">connecting…</div>')
+const status = document.getElementById('status')!
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src="${viteLogo}" alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+const viewer = new Cesium.Viewer('app', {
+  baseLayer: new Cesium.ImageryLayer(
+    new Cesium.OpenStreetMapImageryProvider({ url: 'https://tile.openstreetmap.org/' })
+  ),
+  baseLayerPicker: false, geocoder: false, timeline: false, animation: false,
+  sceneModePicker: false, navigationHelpButton: false, homeButton: false,
+})
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+// One dot per entity, kept in a primitive collection (fast even with thousands)
+const points = new Cesium.PointPrimitiveCollection()
+viewer.scene.primitives.add(points)
+const byId = new Map<string, Cesium.PointPrimitive>()
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+async function refresh() {
+  try {
+    const res = await fetch(`${HUB}/entities?types=flight`)
+    const { items } = await res.json()
+    const seen = new Set<string>()
+    for (const e of items) {
+      seen.add(e.id)
+      const pos = Cesium.Cartesian3.fromDegrees(e.lon, e.lat, e.alt_m)
+      const existing = byId.get(e.id)
+      if (existing) {
+        existing.position = pos
+      } else {
+        byId.set(e.id, points.add({ id: e.id, position: pos, pixelSize: 6, color: Cesium.Color.YELLOW }))
+      }
+    }
+    for (const [id, p] of byId) {
+      if (!seen.has(id)) { points.remove(p); byId.delete(id) }
+    }
+    status.textContent = `${items.length} flights`
+  } catch (err) {
+    status.textContent = 'hub unreachable'
+  }
+}
+
+refresh()
+setInterval(refresh, 5000)
+
+viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(78.487, 17.385, 900_000) })
