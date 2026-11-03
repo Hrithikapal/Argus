@@ -11,8 +11,11 @@ class EntityStore:
         self._items: dict[str, dict] = {}
 
     def upsert_many(self, entities: list[dict]) -> None:
+        """Newer report wins: if two feeds report the same aircraft, keep the fresher one."""
         for e in entities:
-            self._items[e["id"]] = e
+            old = self._items.get(e["id"])
+            if old is None or e["updated_at"] >= old["updated_at"]:
+                self._items[e["id"]] = e
 
     def prune(self) -> int:
         cutoff = time.time() - self.ttl

@@ -7,35 +7,50 @@ from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.store import store
-from app.sources.flights import fetch_flights, normalize
+from app.sources import opensky
+from app.sources.flights import fetch_flights, normalize as normalize_local
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("argus")
 
-FLIGHT_POINTS = [(17.385, 78.487)]   # one circle for now; we'll tile the world later
-FLIGHT_INTERVAL = 10                 # seconds between fetches
-last_ok: dict[str, float] = {}       # per-source timestamp of last successful fetch
+WORLD_INTERVAL = 90   # OpenSky: whole world, 4 credits per call, ~1000 calls/day
+LOCAL_INTERVAL = 10   # adsb.lol: fresh detail around where users are looking
+hot_points: set[tuple[float, float]] = {(17.385, 78.487)}   # the web client will update this later
+last_ok: dict[str, float] = {}
 
 
-async def flights_loop():
+async def world_flights_loop():
     while True:
         try:
-            for lat, lon in FLIGHT_POINTS:
-                raw = await fetch_flights(lat, lon)
-                store.upsert_many([f for f in (normalize(a) for a in raw) if f])
-            last_ok["flight"] = time.time()
-            log.info("flights in store: %s", store.counts().get("flight", 0))
+            raw, credits = await opensky.fetch_world()
+            store.upsert_many([f for f in (opensky.normalize(s) for s in raw) if f])
+            last_ok["opensky"] = time.time()
+            log.info("opensky: %s aircraft, credits left %s", len(raw), credits)
         except Exception as e:
-            log.warning("flights fetch failed: %s", e)
+            log.warning("opensky fetch failed: %s", e)
         store.prune()
-        await asyncio.sleep(FLIGHT_INTERVAL)
+        await asyncio.sleep(WORLD_INTERVAL)
+
+
+async def local_flights_loop():
+    while True:
+        try:
+            for lat, lon in list(hot_points):
+                raw = await fetch_flights(lat, lon)
+                store.upsert_many([f for f in (normalize_local(a) for a in raw) if f])
+            last_ok["adsb_lol"] = time.time()
+        except Exception as e:
+            log.warning("adsb.lol fetch failed: %s", e)
+        await asyncio.sleep(LOCAL_INTERVAL)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    task = asyncio.create_task(flights_loop())
+    tasks = [asyncio.create_task(world_flights_loop()),
+             asyncio.create_task(local_flights_loop())]
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="Argus hub", lifespan=lifespan)

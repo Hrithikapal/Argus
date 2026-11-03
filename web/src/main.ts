@@ -33,7 +33,11 @@ async function refresh() {
       if (existing) {
         existing.position = pos
       } else {
-        byId.set(e.id, points.add({ id: e.id, position: pos, pixelSize: 6, color: Cesium.Color.YELLOW }))
+       byId.set(e.id, points.add({
+  id: e.id, position: pos, pixelSize: 5,
+  color: Cesium.Color.YELLOW, outlineColor: Cesium.Color.BLACK, outlineWidth: 1,
+  disableDepthTestDistance: Number.POSITIVE_INFINITY,   // always drawn on top
+}))
       }
     }
     for (const [id, p] of byId) {
@@ -48,4 +52,4 @@ async function refresh() {
 refresh()
 setInterval(refresh, 5000)
 
-viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(78.487, 17.385, 900_000) })
+viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(60, 20, 25_000_000) })
